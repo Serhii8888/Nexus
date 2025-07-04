@@ -99,6 +99,4 @@ screen -S $SCREEN_SESSION -X stuff "docker run -it --init --name $CONTAINER_NAME
 echo "✅ Установка завершена."
 echo "ℹ️ Підключитись до screen сесії: screen -r $SCREEN_SESSION"
 echo "ℹ️ Для від’єднання з сесії натисніть Ctrl+A, потім D"
-echo "ℹ️ Для перегляду логів ноди використовуйте:"
-echo "docker logs -f $CONTAINER_NAME"
 echo "ℹ️ Логи автооновлення: $LOG_FILE"
