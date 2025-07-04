@@ -83,12 +83,17 @@ echo "[INFO] Запуск ноди Nexus CLI в screen сесії \"$SCREEN_SESS
 docker stop $CONTAINER_NAME || true
 docker rm $CONTAINER_NAME || true
 
-# Перевіряємо чи існує сесія screen, якщо ні — створюємо у відключеному режимі
-if ! screen -list | grep -q "$SCREEN_SESSION"; then
-    screen -dmS $SCREEN_SESSION
+# Закриваємо існуючу screen сесію, якщо вона є
+if screen -list | grep -q "\.$SCREEN_SESSION"; then
+    echo "[INFO] Зупинка існуючої screen сесії \"$SCREEN_SESSION\"..."
+    screen -S $SCREEN_SESSION -X quit
+    sleep 2
 fi
 
-# Запускаємо docker run всередині screen (завдяки команді stuff)
+# Створюємо нову screen сесію у відключеному режимі
+screen -dmS $SCREEN_SESSION
+
+# Запускаємо docker run всередині screen (через команду stuff)
 screen -S $SCREEN_SESSION -X stuff "docker run --init --network host --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
 
 echo "✅ Установка завершена."
