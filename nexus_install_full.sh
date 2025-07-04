@@ -53,14 +53,14 @@ if grep -q "Downloaded newer image" /tmp/nexus_pull.log; then
     echo "[$(date)] Знайдено новий образ, перезапускаємо контейнер" >> $LOG_FILE
     docker stop $CONTAINER_NAME || true
     docker rm $CONTAINER_NAME || true
-    screen -S $SCREEN_SESSION -X stuff "docker run --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
+    screen -S $SCREEN_SESSION -X stuff "docker run -it --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
     echo "[$(date)] Контейнер перезапущено з оновленим образом" >> $LOG_FILE
 else
     echo "[$(date)] Нових оновлень немає" >> $LOG_FILE
     if [ "\$(docker inspect -f '{{.State.Running}}' $CONTAINER_NAME 2>/dev/null)" != "true" ]; then
         echo "[$(date)] Контейнер не працює, запускаємо заново" >> $LOG_FILE
         docker rm $CONTAINER_NAME || true
-        screen -S $SCREEN_SESSION -X stuff "docker run --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
+        screen -S $SCREEN_SESSION -X stuff "docker run -it --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
         echo "[$(date)] Контейнер запущено заново" >> $LOG_FILE
     else
         echo "[$(date)] Контейнер працює стабільно" >> $LOG_FILE
@@ -94,7 +94,7 @@ fi
 screen -dmS $SCREEN_SESSION
 
 # Запускаємо docker run всередині screen (через команду stuff)
-screen -S $SCREEN_SESSION -X stuff "docker run --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
+screen -S $SCREEN_SESSION -X stuff "docker run -it --init --name $CONTAINER_NAME $IMAGE_NAME start --node-id $NODE_ID$(printf '\r')"
 
 echo "✅ Установка завершена."
 echo "ℹ️ Підключитись до screen сесії: screen -r $SCREEN_SESSION"
