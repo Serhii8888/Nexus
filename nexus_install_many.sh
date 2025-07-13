@@ -1,21 +1,30 @@
 #!/bin/bash
 
-declare -a NODE_IDS=()
-
-# Функція для введення нод
 read_node_ids() {
-    echo "Введіть ID нод по одному в рядок. Для завершення введення натисніть Enter на порожньому рядку."
-    while true; do
-        read -rp "ID ноди: " id
-        [[ -z "$id" ]] && break
-        if [[ "$id" =~ ^[0-9]+$ ]]; then
-            NODE_IDS+=("$id")
-        else
-            echo "Помилка: ID має бути числом."
+    echo "Введіть список ID нод одразу (через пробіли або кожен з нового рядка)."
+    echo "Для завершення введення натисніть Enter на порожньому рядку."
+
+    # Зчитуємо всі рядки до порожнього рядка у змінну input
+    input=""
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && break
+        input+="$line "
+    done
+
+    # Перетворюємо рядок у масив, розбиваючи по пробілах
+    read -r -a NODE_IDS <<< "$input"
+
+    # Перевірка валідності ID (тільки числа)
+    for id in "${NODE_IDS[@]}"; do
+        if ! [[ "$id" =~ ^[0-9]+$ ]]; then
+            echo "Попередження: '$id' не є валідним числовим ID і буде пропущено."
+            # Видаляємо невалідний ID
+            NODE_IDS=("${NODE_IDS[@]/$id}")
         fi
     done
+
     if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Нема введених нод. Завершення."
+        echo "Не введено жодного валідного ID. Вихід."
         exit 1
     fi
 }
@@ -39,14 +48,16 @@ restart_nodes() {
 }
 
 show_logs() {
-    echo "Для якої ноди показати логи?"
-    read -rp "Введіть ID ноди: " id
-    if [[ " ${NODE_IDS[*]} " == *" $id "* ]]; then
-        echo "Виводимо логи nexus_node@${id}.service (Ctrl+C для виходу)..."
-        sudo journalctl -u nexus_node@"$id".service -f
-    else
-        echo "Помилка: Ноди з таким ID немає в списку."
-    fi
+    echo "Оберіть ID ноди для перегляду логів:"
+    select id in "${NODE_IDS[@]}"; do
+        if [[ " ${NODE_IDS[*]} " == *" $id "* ]]; then
+            echo "Виводимо логи nexus_node@${id}.service (Ctrl+C для виходу)..."
+            sudo journalctl -u nexus_node@"$id".service -f
+            break
+        else
+            echo "Невірний вибір, спробуйте ще раз."
+        fi
+    done
 }
 
 stop_disable_nodes() {
@@ -82,6 +93,8 @@ main_menu() {
     done
 }
 
-# Запускаємо
+# Починаємо зі зчитування нод
 read_node_ids
+
+# Запускаємо меню
 main_menu
