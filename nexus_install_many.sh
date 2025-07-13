@@ -2,6 +2,37 @@
 
 NODE_IDS=()
 
+create_systemd_template() {
+    local SERVICE_PATH="/etc/systemd/system/nexus_node@.service"
+    local USER_NAME=$(whoami)
+    local WORKDIR="$HOME/rpc/nexus-cli/clients/cli"
+    local EXEC="$HOME/rpc/nexus-cli/target/release/nexus-network"
+
+    if [ ! -f "$SERVICE_PATH" ]; then
+        echo "Створюю systemd шаблон nexus_node@.service..."
+        sudo bash -c "cat > $SERVICE_PATH" <<EOF
+[Unit]
+Description=Nexus Node %i
+After=network.target
+
+[Service]
+Type=simple
+User=$USER_NAME
+WorkingDirectory=$WORKDIR
+ExecStart=$EXEC start --node-id %i
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        sudo systemctl daemon-reload
+        echo "Шаблон systemd створено за адресою $SERVICE_PATH."
+    else
+        echo "Шаблон systemd вже існує, пропускаю створення."
+    fi
+}
+
 read_node_ids() {
     echo "Введіть список ID нод одразу (через пробіли або кожен з нового рядка)."
     echo "Для завершення введення натисніть Enter на порожньому рядку."
@@ -40,6 +71,8 @@ start_nodes() {
     fi
     echo "Запускаємо ноди..."
     for id in "${NODE_IDS[@]}"; do
+        echo "Увімкнення автозапуску nexus_node@${id}.service"
+        sudo systemctl enable nexus_node@"$id".service
         echo "Запуск nexus_node@${id}.service"
         sudo systemctl start nexus_node@"$id".service
     done
@@ -92,6 +125,7 @@ stop_disable_nodes() {
 }
 
 main_menu() {
+    create_systemd_template
     while true; do
         echo
         echo "Оберіть дію:"
