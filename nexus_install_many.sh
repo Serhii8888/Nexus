@@ -1,158 +1,110 @@
 #!/bin/bash
+# ============================================
+# Nexus CLI Node Installer & Multi-Node Setup
+# Автор: NodeUA | https://t.me/nodesua
+# Оновлено: 2026-01-08
+# ============================================
 
-NODE_IDS=()
+THREADS=2  # Потоки на ноду
+UPDATE_SCRIPT="/root/nexus_autoupdate.sh"
+LOG_FILE="/root/nexus_update.log"
 
-create_systemd_template() {
-    local SERVICE_PATH="/etc/systemd/system/nexus_node@.service"
-    local USER_NAME=$(whoami)
-    local WORKDIR="$HOME/rpc/nexus-cli/clients/cli"
-    local EXEC="$HOME/rpc/nexus-cli/target/release/nexus-network"
+echo "🚀 Починаємо установку Nexus CLI та налаштування нод..."
 
-    if [ ! -f "$SERVICE_PATH" ]; then
-        echo "Створюю systemd шаблон nexus_node@.service..."
-        sudo bash -c "cat > $SERVICE_PATH" <<EOF
+# ===========================
+# 1️⃣ Видалення старих нод та файлів
+# ===========================
+echo "[1/5] Видаляємо старі установки та файли..."
+sudo systemctl stop nexus_node@* 2>/dev/null
+sudo systemctl disable nexus_node@* 2>/dev/null
+sudo rm -rf /root/.nexus
+sudo rm -f /etc/systemd/system/nexus_node@*.service
+
+# ===========================
+# 2️⃣ Оновлення системи та залежностей
+# ===========================
+echo "[2/5] Оновлення системи та встановлення залежностей..."
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y build-essential pkg-config libssl-dev git screen curl
+
+# ===========================
+# 3️⃣ Встановлення Nexus CLI
+# ===========================
+echo "[3/5] Встановлення Nexus CLI..."
+curl https://cli.nexus.xyz/ | sh
+source ~/.bashrc
+
+# ===========================
+# 4️⃣ Введення Node ID(ів)
+# ===========================
+echo "[4/5] Введіть Node ID для кожної ноди. Через пробіл для кількох."
+read -p "🔹 Node ID(и): " NODE_IDS
+
+if [ -z "$NODE_IDS" ]; then
+    echo "❌ Не введено жодного Node ID. Вихід."
+    exit 1
+fi
+
+# ===========================
+# 5️⃣ Створення systemd-сервісів для кожної ноди
+# ===========================
+echo "[5/5] Створення systemd-сервісів для нод..."
+for NODE_ID in $NODE_IDS; do
+    SERVICE_FILE="/etc/systemd/system/nexus_node@${NODE_ID}.service"
+    sudo bash -c "cat > $SERVICE_FILE" << EOF
 [Unit]
-Description=Nexus Node %i
+Description=Nexus Node ${NODE_ID}
 After=network.target
 
 [Service]
 Type=simple
-User=$USER_NAME
-WorkingDirectory=$WORKDIR
-ExecStart=$EXEC start --node-id %i
+User=root
+WorkingDirectory=/root/.nexus
+ExecStart=/root/.nexus/bin/nexus-network start --max-threads $THREADS --node-id ${NODE_ID} --headless
 Restart=on-failure
-RestartSec=5s
+RestartSec=10s
 
 [Install]
 WantedBy=multi-user.target
 EOF
-        sudo systemctl daemon-reload
-        echo "Шаблон systemd створено за адресою $SERVICE_PATH."
-    else
-        echo "Шаблон systemd вже існує, пропускаю створення."
-    fi
-}
 
-read_node_ids() {
-    echo "Введіть список ID нод одразу (через пробіли або кожен з нового рядка)."
-    echo "Для завершення введення натисніть Enter на порожньому рядку."
+    sudo systemctl daemon-reload
+    sudo systemctl enable nexus_node@${NODE_ID}
+    sudo systemctl start nexus_node@${NODE_ID}
+    echo "✅ Нода ${NODE_ID} запущена та додана до автозавантаження."
+done
 
-    input=""
-    while IFS= read -r line; do
-        [[ -z "$line" ]] && break
-        input+="$line "
-    done
+# ===========================
+# 6️⃣ Створення скрипта автооновлення CLI
+# ===========================
+echo "[6/6] Налаштування автооновлення Nexus CLI..."
+cat > $UPDATE_SCRIPT << 'EOF'
+#!/bin/bash
+LOG_FILE="/root/nexus_update.log"
+echo "[$(date)] Перевірка оновлень Nexus CLI..." >> $LOG_FILE
 
-    read -r -a NODE_IDS <<< "$input"
+OLD_VERSION=$(/root/.nexus/bin/nexus-network version | grep "Version" | awk '{print $2}')
+curl https://cli.nexus.xyz/ | sh >> /tmp/nexus_update.log 2>&1
+source ~/.bashrc
+NEW_VERSION=$(/root/.nexus/bin/nexus-network version | grep "Version" | awk '{print $2}')
 
-    # Фільтрація валідних числових ID
-    local valid_ids=()
-    for id in "${NODE_IDS[@]}"; do
-        if [[ "$id" =~ ^[0-9]+$ ]]; then
-            valid_ids+=("$id")
-        else
-            echo "Попередження: '$id' не є валідним числом і буде пропущено."
-        fi
-    done
-    NODE_IDS=("${valid_ids[@]}")
+if [ "$OLD_VERSION" != "$NEW_VERSION" ]; then
+    echo "[$(date)] Оновлення з $OLD_VERSION до $NEW_VERSION, перезапуск усіх нод..." >> $LOG_FILE
+    systemctl restart nexus_node@* 
+    echo "[$(date)] Усі ноди перезапущені." >> $LOG_FILE
+else
+    echo "[$(date)] Нових оновлень немає." >> $LOG_FILE
+fi
+EOF
 
-    if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Не введено жодного валідного ID. Повертаємось у меню."
-        return 1
-    fi
+chmod +x $UPDATE_SCRIPT
 
-    return 0
-}
+# Додаємо автооновлення у crontab (щодня о 04:00)
+(crontab -l 2>/dev/null; echo "0 4 * * * $UPDATE_SCRIPT") | crontab -
 
-start_nodes() {
-    if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Список нод порожній. Спершу введіть ID нод (пункт меню 1)."
-        return
-    fi
-    echo "Запускаємо ноди..."
-    for id in "${NODE_IDS[@]}"; do
-        echo "Увімкнення автозапуску nexus_node@${id}.service"
-        sudo systemctl enable nexus_node@"$id".service
-        echo "Запуск nexus_node@${id}.service"
-        sudo systemctl start nexus_node@"$id".service
-    done
-    echo "Усі ноди запущено."
-}
-
-restart_nodes() {
-    if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Список нод порожній. Спершу введіть ID нод (пункт меню 1)."
-        return
-    fi
-    echo "Перезапускаємо ноди..."
-    for id in "${NODE_IDS[@]}"; do
-        echo "Перезапуск nexus_node@${id}.service"
-        sudo systemctl restart nexus_node@"$id".service
-    done
-    echo "Усі ноди перезапущено."
-}
-
-show_logs() {
-    if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Список нод порожній. Спершу введіть ID нод (пункт меню 1)."
-        return
-    fi
-    echo "Оберіть ID ноди для перегляду логів:"
-    select id in "${NODE_IDS[@]}"; do
-        if [[ " ${NODE_IDS[*]} " == *" $id "* ]]; then
-            echo "Виводимо логи nexus_node@${id}.service (Ctrl+C для виходу)..."
-            sudo journalctl -u nexus_node@"$id".service -f
-            break
-        else
-            echo "Невірний вибір, спробуйте ще раз."
-        fi
-    done
-}
-
-stop_disable_nodes() {
-    if [ ${#NODE_IDS[@]} -eq 0 ]; then
-        echo "Список нод порожній. Спершу введіть ID нод (пункт меню 1)."
-        return
-    fi
-    echo "Зупиняємо та вимикаємо автозапуск усіх нод..."
-    for id in "${NODE_IDS[@]}"; do
-        echo "Зупинка nexus_node@${id}.service"
-        sudo systemctl stop nexus_node@"$id".service
-        echo "Відключення автозапуску nexus_node@${id}.service"
-        sudo systemctl disable nexus_node@"$id".service
-    done
-    echo "Усі ноди зупинено та вимкнено."
-}
-
-main_menu() {
-    create_systemd_template
-    while true; do
-        echo
-        echo "Оберіть дію:"
-        echo "1) Ввести список ID нод"
-        echo "2) Запустити ноди"
-        echo "3) Перезапустити ноди"
-        echo "4) Подивитись логи ноди"
-        echo "5) Видалити (зупинити і відключити автозапуск) усі ноди"
-        echo "6) Вийти"
-        read -rp "Ваш вибір: " choice
-
-        case $choice in
-            1)
-                if ! read_node_ids; then
-                    echo "Список нод не оновлено."
-                else
-                    echo "Список нод оновлено."
-                fi
-                ;;
-            2) start_nodes ;;
-            3) restart_nodes ;;
-            4) show_logs ;;
-            5) stop_disable_nodes ;;
-            6) echo "Вихід."; exit 0 ;;
-            *) echo "Невірний вибір, спробуйте ще раз." ;;
-        esac
-    done
-}
-
-main_menu
+echo ""
+echo "🎉 Встановлення завершено!"
+echo "ℹ️ Підключення до ноди: journalctl -u nexus_node@<NodeID> -f"
+echo "🌐 Статистика нод: https://app.nexus.xyz/nodes"
+echo "📊 Логи автооновлення: $LOG_FILE"
+echo "🕓 Автооновлення налаштовано на 04:00 щодня."
